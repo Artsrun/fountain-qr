@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Fountain QR — notes</title>
+  <style>
+    :root { --bg:#070a11; --panel:#10151f; --line:#1c2433; --ink:#e8edf5; --dim:#8b97ab; --orange:#f5a623; --green:#3dde8a; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 ui-sans-serif, system-ui, sans-serif; }
+    header { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    header strong { color: var(--orange); letter-spacing: .08em; font-family: ui-monospace, Menlo, monospace; }
+    a { color: var(--orange); }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 20px 64px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    h2 { font-size: 18px; margin: 28px 0 8px; color: var(--orange); }
+    p, li { color: #d5dce8; }
+    .dim { color: var(--dim); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0 20px; }
+    th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 8px 6px; vertical-align: top; }
+    th { color: var(--dim); font-weight: 600; }
+    pre, code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+    pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; overflow-x: auto; font-size: 13px; }
+    .btn { display: inline-block; background: var(--orange); color: #1a1000; text-decoration: none; font-weight: 700; padding: 10px 14px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>DECIMEN NOTES</strong>
+    <a class="btn" href="./demo.html">Open demo</a>
+  </header>
+  <main>
+    <h1>Fountain codes over a camera</h1>
+    <p class="dim">Screen → light → QR → peel. No Wi-Fi path for the file itself.</p>
+
+    <h2>1. What the clip claimed</h2>
+    <p>Two phones. Red TX paints QR v40 at 60 fps, 2953 B/frame. Blue RX camera locks and peels. Result: <strong>365 KB in 2.6 s (140.42 KB/s)</strong>. Payload was Rick Astley. Stream never ends; RX stops on hash.</p>
+    <p>The snow is not analog noise. It is dense QR modules changing faster than the eye tracks.</p>
+    <p>Hygiene: payload travels as light. Both pages still loaded from a URL (<code>decimen.dfs.lan</code>). Not encrypted. Any camera pointed at the glass can reconstruct.</p>
+
+    <h2>2. OCC vs LiFi</h2>
+    <table>
+      <tr><th></th><th>OCC (this)</th><th>LiFi / 802.11bb</th><th>FSO</th></tr>
+      <tr><td>TX</td><td>screen / LED matrix</td><td>LED or IR luminaire</td><td>laser</td></tr>
+      <tr><td>RX</td><td>camera</td><td>photodiode</td><td>PD / APD</td></tr>
+      <tr><td>Rate</td><td>kb/s–low Mb/s</td><td>10 Mb/s–9.6 Gb/s</td><td>Gb/s–25 Gb/s</td></tr>
+      <tr><td>Why</td><td>phone you already have</td><td>needs optical frontend</td><td>alignment</td></tr>
+    </table>
+    <p>OCC bottleneck = camera fps × bytes/frame. LiFi bottleneck = LED/PD bandwidth. Pick OCC for two phones now. Pick LiFi for an RF-denied room with ceiling kits.</p>
+
+    <h2>3. Fountain theory, one example</h2>
+    <p>File <code>HELP</code>, one letter per block, K = 4.</p>
+    <pre>x1=H  x2=E  x3=L  x4=P</pre>
+    <p>Each droplet: pick d block IDs, XOR those blocks, ship XOR + the ID list.</p>
+    <table>
+      <tr><th>seq</th><th>IDs</th><th>sent</th></tr>
+      <tr><td>0–3</td><td>{1} {2} {3} {4}</td><td>raw H E L P (systematic)</td></tr>
+      <tr><td>4</td><td>{1,3}</td><td>H⊕L</td></tr>
+      <tr><td>5</td><td>{2,4}</td><td>E⊕P</td></tr>
+    </table>
+    <p>Camera drops <code>E</code>. Received: H, L, P, H⊕L, E⊕P.</p>
+    <p>Peel: degree-1 droplets give H, L, P. Then</p>
+    <pre>x2 = (E⊕P) ⊕ P = E</pre>
+    <p>Never received E as its own frame. That is the decoder.</p>
+    <p>Need about <code>K × (1 + ε)</code> distinct droplets. Decimen quotes ε ≈ 0.15. Duplicates and unreadable QRs are erasures — ignore them. No ACK.</p>
+
+    <h2>4. Degree is the knob</h2>
+    <ul>
+      <li><code>d = 1</code> starts the peel (ripple).</li>
+      <li><code>d = 2</code> turns one known block into another.</li>
+      <li><code>d ≈ K</code> is a smoothie of everything — useless until you already have K−1.</li>
+    </ul>
+    <p>Ideal soliton keeps the ripple at ~1 — one blur kills it. Robust soliton over-weights d=1 so the ripple stays alive. This demo uses a toy table (systematic + d∈{1,2,3}) that is enough for small K.</p>
+
+    <h2>5. Clip math</h2>
+    <pre>raw     2953 B × 60 fps ≈ 177 KB/s
+goodput 140 KB/s
+extra   ≈ 26%  = fountain ε + 7 drops + lock</pre>
+
+    <h2>6. Demo protocol</h2>
+    <pre>DCI1 | session | seq | K | blockSize | fileLen | name | idxs | XOR payload</pre>
+    <p>First K frames are raw blocks. Then mixed droplets. jsQR miss = erasure. <code>peel()</code> while a droplet has one unknown index. Stop when recovered === K.</p>
+    <p>Phone-camera safe defaults: 48 B blocks, 12 fps, ECC M. Not Decimen v40 density.</p>
+
+    <p><a class="btn" href="./demo.html">Run the demo</a></p>
+    <p class="dim">Source: <a href="https://github.com/Artsrun/fountain-qr">Artsrun/fountain-qr</a>. Inspired by <a href="https://github.com/bashalarmistalt/decimen-optical-transfer">Decimen Optical Transfer</a> (MIT). This page is notes + a toy codec, not a port.</p>
+  </main>
+</body>
+</html>
