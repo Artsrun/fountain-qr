@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>DECIMEN — Fountain QR Demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <style>
+    :root {
+      --bg: #070a11;
+      --panel: #10151f;
+      --line: #1c2433;
+      --ink: #e8edf5;
+      --dim: #8b97ab;
+      --orange: #f5a623;
+      --green: #3dde8a;
+      --red: #ff5d6c;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 16px; border-bottom: 1px solid var(--line);
+    }
+    header strong { color: var(--orange); letter-spacing: .08em; }
+    header span { color: var(--dim); font-size: 12px; }
+    nav { display: flex; gap: 6px; padding: 10px 16px; }
+    nav button, .btn {
+      background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 12px; cursor: pointer; font: inherit;
+    }
+    nav button.on { border-color: var(--orange); color: var(--orange); }
+    .btn.primary { background: var(--orange); color: #1a1000; border-color: var(--orange); font-weight: 700; }
+    .btn.ghost { color: var(--dim); }
+    main { padding: 0 16px 24px; max-width: 720px; margin: 0 auto; }
+    .pane { display: none; }
+    .pane.on { display: block; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+    .stat {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+    }
+    .stat label { display: block; color: var(--dim); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+    .stat b { font-size: 18px; }
+    .stat b.ok { color: var(--green); }
+    .stat b.warn { color: var(--orange); }
+    label.field { display: block; color: var(--dim); font-size: 11px; margin: 10px 0 4px; }
+    input, textarea, select {
+      width: 100%; background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 10px; font: inherit;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    #qrWrap, #camWrap {
+      margin: 12px 0; background: #fff; border-radius: 12px; overflow: hidden;
+      display: grid; place-items: center; min-height: 280px;
+    }
+    #qrCanvas, #camCanvas { width: 100%; max-width: 420px; height: auto; display: block; }
+    #camVideo { display: none; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .banner {
+      margin: 12px 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+      background: #0c1a14; color: var(--green); display: none;
+    }
+    .banner.on { display: block; }
+    #preview { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+    .hint { color: var(--dim); font-size: 12px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <strong>DECIMEN</strong>
+      <div><span>Fountain QR file transfer — JS demo</span></div>
+    </div>
+    <a href="./" style="color:#f5a623;text-decoration:none;font-size:12px">← notes</a>
+  </header>
+  <nav>
+    <button class="on" data-tab="send">Send</button>
+    <button data-tab="recv">Receive</button>
+    <button data-tab="loop">Loopback</button>
+  </nav>
+  <main>
+    <section id="send" class="pane on">
+      <label class="field">Text or file</label>
+      <textarea id="textIn" placeholder="Type a payload…">Never gonna give you up.</textarea>
+      <div class="row">
+        <input id="fileIn" type="file" />
+      </div>
+      <div class="grid">
+        <div>
+          <label class="field">FPS</label>
+          <input id="fps" type="number" min="4" max="30" value="12" />
+        </div>
+        <div>
+          <label class="field">Block size (B)</label>
+          <input id="blockSize" type="number" min="16" max="120" value="48" />
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="startSend">Start stream</button>
+        <button class="btn ghost" id="stopSend">Stop</button>
+      </div>
+      <div id="qrWrap"><canvas id="qrCanvas"></canvas></div>
+      <div class="grid">
+        <div class="stat"><label>Session</label><b id="txSession">—</b></div>
+        <div class="stat"><label>Seq / K</label><b id="txSeq">—</b></div>
+        <div class="stat"><label>Payload</label><b id="txBytes">—</b></div>
+        <div class="stat"><label>Frame</label><b id="txFrame">—</b></div>
+      </div>
+      <p class="hint">Point the Receive tab (other phone) at this QR. Keep brightness max. Small blocks decode more reliably than Decimen v40.</p>
+    </section>
+
+    <section id="recv" class="pane">
+      <div class="row">
+        <button class="btn primary" id="startCam">Start camera</button>
+        <button class="btn ghost" id="stopCam">Stop</button>
+      </div>
+      <div id="camWrap"><video id="camVideo" playsinline muted></video><canvas id="camCanvas"></canvas></div>
+      <div class="grid">
+        <div class="stat"><label>Capture</label><b id="rxCap">0</b></div>
+        <div class="stat"><label>Decode fps</label><b id="rxDec" class="warn">0</b></div>
+        <div class="stat"><label>Lock</label><b id="rxLock">—</b></div>
+        <div class="stat"><label>Dropped</label><b id="rxDrop">0</b></div>
+        <div class="stat"><label>New / dup</label><b id="rxFrames">0/0</b></div>
+        <div class="stat"><label>Solved</label><b id="rxSolved">0/0</b></div>
+      </div>
+      <div class="banner" id="doneBanner"></div>
+      <div class="row">
+        <a class="btn" id="dlLink" style="display:none">Download</a>
+      </div>
+      <pre id="textOut" class="hint"></pre>
+      <img id="preview" alt="" />
+    </section>
+
+    <section id="loop" class="pane">
+      <p class="hint">Same-tab proof: encode → paint QR → jsQR → fountain peel. No camera.</p>
+      <div class="row">
+        <button class="btn primary" id="runLoop">Run loopback</button>
+      </div>
+      <div class="grid">
+        <div class="stat"><label>Droplets used</label><b id="lbUsed">—</b></div>
+        <div class="stat"><label>Decoded</label><b id="lbOk">—</b></div>
+      </div>
+      <pre id="lbOut" class="hint"></pre>
+    </section>
+  </main>
+
+<script src="./demo.js"></script>
+</body>
+</html>
