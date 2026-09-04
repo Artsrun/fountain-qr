@@ -48,7 +48,7 @@ const degreeOf = (seq, K) => {
 
 const packFrame = ({ session, seq, K, blockSize, fileLen, name, idxs, payload }) => {
   const nameB = new TextEncoder().encode(name.slice(0, 40));
-  const buf = new Uint8Array(20 + 2 * idxs.length + payload.length + 1 + nameB.length);
+  const buf = new Uint8Array(22 + nameB.length + 2 * idxs.length + payload.length);
   const v = new DataView(buf.buffer);
   let o = 0;
   buf[0] = 68; buf[1] = 67; buf[2] = 73; buf[3] = 49; o = 4;
@@ -120,18 +120,19 @@ const createDecoder = () => {
     while (progressed) {
       progressed = false;
       for (const d of droplets) {
-        d.idxs = d.idxs.filter((i) => !solved[i]);
+        const next = [];
+        for (const i of d.idxs) {
+          if (solved[i]) {
+            for (let j = 0; j < d.payload.length; j++) d.payload[j] ^= solved[i][j];
+          } else next.push(i);
+        }
+        d.idxs = next;
         if (d.idxs.length !== 1) continue;
         const i = d.idxs[0];
         if (solved[i]) continue;
         solved[i] = d.payload.slice();
         recovered++;
         progressed = true;
-        for (const o of droplets) {
-          if (o === d) continue;
-          if (!o.idxs.includes(i)) continue;
-          for (let j = 0; j < o.payload.length; j++) o.payload[j] ^= solved[i][j];
-        }
         d.idxs = [];
       }
     }
@@ -154,7 +155,10 @@ const createDecoder = () => {
     assemble() {
       if (!meta || recovered < meta.K) return null;
       const out = new Uint8Array(meta.K * meta.blockSize);
-      for (let i = 0; i < meta.K; i++) out.set(solved[i], i * meta.blockSize);
+      for (let i = 0; i < meta.K; i++) {
+        if (!solved[i]) return null;
+        out.set(solved[i], i * meta.blockSize);
+      }
       return { bytes: out.subarray(0, meta.fileLen), name: meta.name, meta };
     },
     get meta() { return meta; },
@@ -169,6 +173,7 @@ tabs.forEach((b) => b.onclick = () => {
   document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === b.dataset.tab));
 });
 let txTimer = 0, txSeq = 0, txSrc = null, txSession = 0, txName = 'note.txt';
+let painting = false;
 
 const paintQR = async (text) => {
   const canvas = $('qrCanvas');
@@ -200,11 +205,17 @@ $('startSend').onclick = async () => {
   $('txBytes').textContent = bytes.length + ' B';
   const fps = Math.max(4, Math.min(30, +$('fps').value || 12));
   const tick = async () => {
-    const droplet = makeDroplet(txSrc, txSession, txSeq, txName);
-    await paintQR(droplet);
-    $('txSeq').textContent = txSeq + ' / ' + txSrc.K;
-    $('txFrame').textContent = droplet.length + ' ch';
-    txSeq++;
+    if (painting || !txSrc) return;
+    painting = true;
+    try {
+      const droplet = makeDroplet(txSrc, txSession, txSeq, txName);
+      await paintQR(droplet);
+      $('txSeq').textContent = txSeq + ' / ' + txSrc.K;
+      $('txFrame').textContent = droplet.length + ' ch';
+      txSeq++;
+    } finally {
+      painting = false;
+    }
   };
   await tick();
   txTimer = setInterval(tick, 1000 / fps);
@@ -229,8 +240,11 @@ const resetRxUi = () => {
 const onDecodedText = (text) => {
   const frame = unpackFrame(text);
   if (!frame) { dropN++; return; }
-  const r = decoder.add(frame);
-  if (r.reset) { resetRxUi(); decoder.add(frame); }
+  let r = decoder.add(frame);
+  if (r.reset) {
+    resetRxUi();
+    r = decoder.add(frame);
+  }
   if (r.dup) dupN++;
   else if (r.ok) newN++;
   $('rxLock').textContent = r.meta ? 'LOCK' : '—';
@@ -271,10 +285,15 @@ const scanCanvas = (canvas) => {
 
 $('startCam').onclick = async () => {
   resetRxUi();
-  camStream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, frameRate: { ideal: 30 } },
-    audio: false,
-  });
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, frameRate: { ideal: 30 } },
+      audio: false,
+    });
+  } catch (err) {
+    $('textOut').textContent = 'camera: ' + (err && err.message ? err.message : err);
+    return;
+  }
   const video = $('camVideo');
   video.srcObject = camStream;
   await video.play();
@@ -316,7 +335,8 @@ $('runLoop').onclick = async () => {
   const dec = createDecoder();
   let used = 0;
   const canvas = $('qrCanvas');
-  for (let seq = 0; seq < src.K * 3; seq++) {
+  for (let seq = 0; seq < src.K * 6; seq++) {
+    if (seq < src.K && seq % 2 === 0) continue;
     const text = makeDroplet(src, session, seq, 'loop.txt');
     await QRCode.toCanvas(canvas, text, { errorCorrectionLevel: 'M', margin: 2, width: 360 });
     const ctx = canvas.getContext('2d');
@@ -329,9 +349,10 @@ $('runLoop').onclick = async () => {
     if (r.done) {
       const got = dec.assemble();
       const txt = new TextDecoder().decode(got.bytes);
+      const ok = txt === new TextDecoder().decode(bytes);
       $('lbUsed').textContent = used + ' / ' + src.K;
-      $('lbOk').textContent = txt === new TextDecoder().decode(bytes) ? 'OK' : 'MISMATCH';
-      $('lbOk').className = txt === new TextDecoder().decode(bytes) ? 'ok' : '';
+      $('lbOk').textContent = ok ? 'OK' : 'MISMATCH';
+      $('lbOk').className = ok ? 'ok' : '';
       $('lbOut').textContent = txt;
       return;
     }
