@@ -117,7 +117,6 @@ const createDecoder = () => {
   const droplets = [];
   const solved = [];
   let recovered = 0;
-
   const peel = () => {
     let progressed = true;
     while (progressed) {
@@ -140,7 +139,6 @@ const createDecoder = () => {
       }
     }
   };
-
   return {
     add(frame) {
       if (!frame) return { ok: false };
@@ -256,13 +254,7 @@ const compressImage = async (file) => {
 };
 
 const paintQR = async (text) => {
-  if (typeof QRCode === 'undefined') throw new Error('QRCode lib missing');
-  await QRCode.toCanvas($('qrCanvas'), text, {
-    errorCorrectionLevel: 'M',
-    margin: 2,
-    width: 420,
-    color: { dark: '#000000', light: '#ffffff' },
-  });
+  await window.paintFountainQR($('qrCanvas'), text);
 };
 
 const syncFileChip = () => {
@@ -340,6 +332,7 @@ $('startSend').onclick = async () => {
   clearInterval(txTimer);
   txTimer = 0;
   try {
+    await window.ensureQR();
     let bytes, name;
     if (prepared) {
       bytes = prepared.bytes;
@@ -449,6 +442,7 @@ const onDecodedText = (text) => {
 };
 
 const scanCanvas = (canvas) => {
+  if (typeof jsQR !== 'function') return;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const { width, height } = canvas;
   if (!width || !height) return;
@@ -464,12 +458,13 @@ $('startCam').onclick = async () => {
   resetRxUi();
   showErr('rxErr', '');
   try {
+    await window.ensureJSQR();
     camStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, frameRate: { ideal: 30 } },
       audio: false,
     });
   } catch (err) {
-    showErr('rxErr', 'camera: ' + (err && err.message ? err.message : err));
+    showErr('rxErr', String(err.message || err));
     setCamOn(false);
     return;
   }
@@ -516,6 +511,8 @@ $('runLoop').onclick = async () => {
   setOn($('runLoop'), true);
   $('runLoop').textContent = 'Running…';
   try {
+    await window.ensureQR();
+    await window.ensureJSQR();
     const bytes = new TextEncoder().encode($('textIn').value || 'loopback works');
     const src = splitFile(bytes, 48);
     const session = 0xC0FFEE;
@@ -525,7 +522,7 @@ $('runLoop').onclick = async () => {
     for (let seq = 0; seq < src.K * 6; seq++) {
       if (seq < src.K && seq % 2 === 0) continue;
       const text = makeDroplet(src, session, seq, 'loop.txt');
-      await QRCode.toCanvas(canvas, text, { errorCorrectionLevel: 'M', margin: 2, width: 360 });
+      await window.paintFountainQR(canvas, text);
       const ctx = canvas.getContext('2d');
       const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const code = jsQR(img.data, canvas.width, canvas.height, { inversionAttempts: 'dontInvert' });
