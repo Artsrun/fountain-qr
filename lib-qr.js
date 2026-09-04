@@ -9,10 +9,7 @@ const loadScript = (src) => new Promise((res, rej) => {
 const loadFirst = async (urls) => {
   let last = null;
   for (const u of urls) {
-    try {
-      await loadScript(u);
-      return u;
-    } catch (e) { last = e; }
+    try { await loadScript(u); return u; } catch (e) { last = e; }
   }
   throw last || new Error('no script');
 };
@@ -37,13 +34,14 @@ window.ensureJSQR = async () => {
   if (typeof jsQR !== 'function') throw new Error('jsQR blocked — open in Safari, not Telegram');
 };
 
-window.paintFountainQR = async (canvas, text) => {
+window.paintFountainQR = async (canvas, text, px = 420) => {
   await window.ensureQR();
+  const sizePx = Math.max(240, Math.min(900, px | 0));
   if (typeof QRCode !== 'undefined' && QRCode.toCanvas) {
     await QRCode.toCanvas(canvas, text, {
       errorCorrectionLevel: 'M',
       margin: 2,
-      width: 420,
+      width: sizePx,
       color: { dark: '#000000', light: '#ffffff' },
     });
     return;
@@ -53,7 +51,7 @@ window.paintFountainQR = async (canvas, text) => {
   qr.make();
   const n = qr.getModuleCount();
   const margin = 2;
-  const scale = Math.max(2, Math.floor(420 / (n + margin * 2)));
+  const scale = Math.max(2, Math.floor(sizePx / (n + margin * 2)));
   const size = (n + margin * 2) * scale;
   canvas.width = size;
   canvas.height = size;

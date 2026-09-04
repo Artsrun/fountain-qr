@@ -1,19 +1,11 @@
-# Fountain QR
+# Fountain QR — Power of Light
 
-Notes + toy OCC demo: fountain-coded QR frames, camera peel, no file-path network.
+Screen → camera file transfer. Luby peel. No file-path network.
 
-- Site: https://artsrun.github.io/fountain-qr/
-- Demo: https://artsrun.github.io/fountain-qr/demo.html
+- v2: https://artsrun.github.io/fountain-qr/
+- v1 lab: https://artsrun.github.io/fountain-qr/demo.html
+- Notes: https://artsrun.github.io/fountain-qr/notes.html
 
-Not a port of [Decimen](https://github.com/bashalarmistalt/decimen-optical-transfer). Smaller blocks so a phone camera locks.
+Not a port of [Decimen](https://decimen.app/). Different wire (`DCI2`). Phone-lock first, density as a preset.
 
-## Pages
-
-Static files on `prod` root (same as pao-tap).
-
-If the Actions deploy fails with `Resource not accessible by integration`:
-
-1. Repo → Settings → Pages
-2. Source: **Deploy from a branch**
-3. Branch: `prod` / `/` (root)
-4. Save
+Decimen peak (their receipts): ~200 KB/s phone-to-phone with QR v40 + zxing WASM + multi-code. This v2 stays in jsQR range so a handheld camera locks: Close preset ≈ 160 B × 20 fps ≈ 3 KB/s after JPEG/gzip shrink.
