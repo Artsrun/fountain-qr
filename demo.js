@@ -1,4 +1,5 @@
 const MAGIC = 'DCI1';
+const MAX_BYTES = 80 * 1024;
 const b64 = {
   enc: (u8) => {
     let s = '';
@@ -92,8 +93,9 @@ const unpackFrame = (text) => {
 
 const splitFile = (bytes, blockSize) => {
   const K = Math.max(1, Math.ceil(bytes.length / blockSize));
-  const blocks = Array.from({ length: K }, () => new Uint8Array(blockSize));
-  for (let i = 0; i < K; i++) blocks[i].set(bytes.subarray(i * blockSize, (i + 1) * blockSize));
+  const pad = new Uint8Array(K * blockSize);
+  pad.set(bytes);
+  const blocks = Array.from({ length: K }, (_, i) => pad.subarray(i * blockSize, (i + 1) * blockSize));
   return { K, blocks, fileLen: bytes.length };
 };
 
@@ -167,17 +169,33 @@ const createDecoder = () => {
 };
 
 const $ = (id) => document.getElementById(id);
+const showErr = (id, msg) => {
+  const el = $(id);
+  if (!msg) { el.classList.remove('on'); el.textContent = ''; return; }
+  el.textContent = msg;
+  el.classList.add('on');
+};
+const setOn = (el, on) => {
+  el.classList.toggle('on', on);
+  el.setAttribute('aria-pressed', on ? 'true' : 'false');
+};
+
 const tabs = document.querySelectorAll('nav button[data-tab]');
-tabs.forEach((b) => b.onclick = () => {
-  tabs.forEach((x) => x.classList.toggle('on', x === b));
-  document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === b.dataset.tab));
+const setTab = (id) => {
+  tabs.forEach((x) => setOn(x, x.dataset.tab === id));
+  document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === id));
+};
+tabs.forEach((b) => {
+  b.addEventListener('click', (e) => { e.preventDefault(); setTab(b.dataset.tab); });
 });
+
 let txTimer = 0, txSeq = 0, txSrc = null, txSession = 0, txName = 'note.txt';
 let painting = false;
+let pickedFile = null;
 
 const paintQR = async (text) => {
-  const canvas = $('qrCanvas');
-  await QRCode.toCanvas(canvas, text, {
+  if (typeof QRCode === 'undefined') throw new Error('QRCode lib missing');
+  await QRCode.toCanvas($('qrCanvas'), text, {
     errorCorrectionLevel: 'M',
     margin: 2,
     width: 420,
@@ -185,47 +203,115 @@ const paintQR = async (text) => {
   });
 };
 
-$('startSend').onclick = async () => {
-  clearInterval(txTimer);
-  const file = $('fileIn').files[0];
-  let bytes, name;
-  if (file) {
-    bytes = new Uint8Array(await file.arrayBuffer());
-    name = file.name;
-  } else {
-    bytes = new TextEncoder().encode($('textIn').value || 'hello');
-    name = 'note.txt';
+const syncFileChip = () => {
+  const chip = $('fileChip');
+  if (!pickedFile) {
+    chip.textContent = 'No file — sending text';
+    chip.classList.remove('on');
+    return;
   }
-  const blockSize = Math.max(16, Math.min(120, +$('blockSize').value || 48));
-  txSrc = splitFile(bytes, blockSize);
-  txSession = (Math.random() * 0xffffffff) >>> 0;
-  txSeq = 0;
-  txName = name;
-  $('txSession').textContent = txSession.toString(16);
-  $('txBytes').textContent = bytes.length + ' B';
-  const fps = Math.max(4, Math.min(30, +$('fps').value || 12));
-  const tick = async () => {
-    if (painting || !txSrc) return;
-    painting = true;
-    try {
-      const droplet = makeDroplet(txSrc, txSession, txSeq, txName);
-      await paintQR(droplet);
-      $('txSeq').textContent = txSeq + ' / ' + txSrc.K;
-      $('txFrame').textContent = droplet.length + ' ch';
-      txSeq++;
-    } finally {
-      painting = false;
-    }
-  };
-  await tick();
-  txTimer = setInterval(tick, 1000 / fps);
+  chip.textContent = `${pickedFile.name} · ${(pickedFile.size / 1024).toFixed(1)} KB`;
+  chip.classList.add('on');
 };
 
-$('stopSend').onclick = () => { clearInterval(txTimer); txTimer = 0; };
+$('pickFile').onclick = () => $('fileIn').click();
+$('fileIn').onchange = () => {
+  pickedFile = $('fileIn').files[0] || null;
+  syncFileChip();
+  showErr('txErr', '');
+};
+$('clearFile').onclick = () => {
+  pickedFile = null;
+  $('fileIn').value = '';
+  syncFileChip();
+  showErr('txErr', '');
+};
+
+const setStreaming = (on) => {
+  setOn($('startSend'), on);
+  $('startSend').textContent = on ? 'Streaming' : 'Start stream';
+  $('startSend').disabled = on;
+  setOn($('stopSend'), !on && !!txTimer === false ? false : !on);
+  setOn($('stopSend'), !on);
+};
+
+$('startSend').onclick = async () => {
+  showErr('txErr', '');
+  clearInterval(txTimer);
+  txTimer = 0;
+  const file = pickedFile;
+  let bytes, name;
+  try {
+    if (file) {
+      if (file.size > MAX_BYTES) {
+        const mins = ((file.size / 48) / 12 / 60).toFixed(0);
+        throw new Error(`${(file.size / 1048576).toFixed(2)} MB is too big for this toy (≈${mins} min @ 48B/12fps). Clear file or pick ≤80 KB.`);
+      }
+      bytes = new Uint8Array(await file.arrayBuffer());
+      name = file.name;
+    } else {
+      bytes = new TextEncoder().encode($('textIn').value || 'hello');
+      name = 'note.txt';
+    }
+    if (bytes.length > MAX_BYTES) throw new Error(`payload ${bytes.length} B > ${MAX_BYTES} B cap`);
+    const blockSize = Math.max(16, Math.min(200, +$('blockSize').value || 48));
+    txSrc = splitFile(bytes, blockSize);
+    txSession = (Math.random() * 0xffffffff) >>> 0;
+    txSeq = 0;
+    txName = name;
+    $('txSession').textContent = txSession.toString(16);
+    $('txBytes').textContent = bytes.length + ' B';
+    $('txSeq').textContent = '0 / ' + txSrc.K;
+    $('txFrame').textContent = 'painting…';
+    const fps = Math.max(4, Math.min(30, +$('fps').value || 12));
+    const tick = async () => {
+      if (painting || !txSrc) return;
+      painting = true;
+      try {
+        const droplet = makeDroplet(txSrc, txSession, txSeq, txName);
+        await paintQR(droplet);
+        $('txSeq').textContent = txSeq + ' / ' + txSrc.K;
+        $('txFrame').textContent = droplet.length + ' ch';
+        txSeq++;
+        showErr('txErr', '');
+      } catch (err) {
+        showErr('txErr', String(err.message || err));
+        clearInterval(txTimer);
+        txTimer = 0;
+        setStreaming(false);
+      } finally {
+        painting = false;
+      }
+    };
+    setStreaming(true);
+    setOn($('stopSend'), false);
+    await tick();
+    txTimer = setInterval(tick, 1000 / fps);
+  } catch (err) {
+    showErr('txErr', String(err.message || err));
+    setStreaming(false);
+  }
+};
+
+$('stopSend').onclick = () => {
+  clearInterval(txTimer);
+  txTimer = 0;
+  painting = false;
+  setStreaming(false);
+  setOn($('stopSend'), true);
+  $('startSend').textContent = 'Start stream';
+};
 
 let camStream = null, camLoop = 0, decoder = createDecoder();
 let capN = 0, decN = 0, dropN = 0, newN = 0, dupN = 0, lastTick = performance.now();
 let finished = false;
+
+const setCamOn = (on) => {
+  setOn($('startCam'), on);
+  $('startCam').textContent = on ? 'Camera on' : 'Start camera';
+  $('startCam').disabled = on;
+  setOn($('stopCam'), !on);
+};
 
 const resetRxUi = () => {
   decoder = createDecoder();
@@ -265,9 +351,7 @@ const onDecodedText = (text) => {
     $('doneBanner').classList.add('on');
     const look = new TextDecoder().decode(got.bytes.slice(0, 200));
     $('textOut').textContent = look;
-    if ((got.name || '').match(/\.(png|jpe?g|gif|webp)$/i)) {
-      $('preview').src = url;
-    }
+    if ((got.name || '').match(/\.(png|jpe?g|gif|webp)$/i)) $('preview').src = url;
   }
 };
 
@@ -285,18 +369,22 @@ const scanCanvas = (canvas) => {
 
 $('startCam').onclick = async () => {
   resetRxUi();
+  showErr('rxErr', '');
   try {
     camStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, frameRate: { ideal: 30 } },
       audio: false,
     });
   } catch (err) {
-    $('textOut').textContent = 'camera: ' + (err && err.message ? err.message : err);
+    showErr('rxErr', 'camera: ' + (err && err.message ? err.message : err));
+    setCamOn(false);
     return;
   }
   const video = $('camVideo');
   video.srcObject = camStream;
   await video.play();
+  setCamOn(true);
+  setOn($('stopCam'), false);
   const canvas = $('camCanvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const loop = () => {
@@ -326,37 +414,51 @@ $('stopCam').onclick = () => {
   cancelAnimationFrame(camLoop);
   camStream?.getTracks().forEach((t) => t.stop());
   camStream = null;
+  setCamOn(false);
+  setOn($('stopCam'), true);
 };
 
 $('runLoop').onclick = async () => {
-  const bytes = new TextEncoder().encode($('textIn').value || 'loopback works');
-  const src = splitFile(bytes, 48);
-  const session = 0xC0FFEE;
-  const dec = createDecoder();
-  let used = 0;
-  const canvas = $('qrCanvas');
-  for (let seq = 0; seq < src.K * 6; seq++) {
-    if (seq < src.K && seq % 2 === 0) continue;
-    const text = makeDroplet(src, session, seq, 'loop.txt');
-    await QRCode.toCanvas(canvas, text, { errorCorrectionLevel: 'M', margin: 2, width: 360 });
-    const ctx = canvas.getContext('2d');
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(img.data, canvas.width, canvas.height, { inversionAttempts: 'dontInvert' });
-    if (!code) continue;
-    const frame = unpackFrame(code.data);
-    const r = dec.add(frame);
-    used++;
-    if (r.done) {
-      const got = dec.assemble();
-      const txt = new TextDecoder().decode(got.bytes);
-      const ok = txt === new TextDecoder().decode(bytes);
-      $('lbUsed').textContent = used + ' / ' + src.K;
-      $('lbOk').textContent = ok ? 'OK' : 'MISMATCH';
-      $('lbOk').className = ok ? 'ok' : '';
-      $('lbOut').textContent = txt;
-      return;
+  showErr('lbErr', '');
+  setOn($('runLoop'), true);
+  $('runLoop').textContent = 'Running…';
+  try {
+    const bytes = new TextEncoder().encode($('textIn').value || 'loopback works');
+    const src = splitFile(bytes, 48);
+    const session = 0xC0FFEE;
+    const dec = createDecoder();
+    let used = 0;
+    const canvas = $('qrCanvas');
+    for (let seq = 0; seq < src.K * 6; seq++) {
+      if (seq < src.K && seq % 2 === 0) continue;
+      const text = makeDroplet(src, session, seq, 'loop.txt');
+      await QRCode.toCanvas(canvas, text, { errorCorrectionLevel: 'M', margin: 2, width: 360 });
+      const ctx = canvas.getContext('2d');
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(img.data, canvas.width, canvas.height, { inversionAttempts: 'dontInvert' });
+      if (!code) continue;
+      const frame = unpackFrame(code.data);
+      const r = dec.add(frame);
+      used++;
+      if (r.done) {
+        const got = dec.assemble();
+        const txt = new TextDecoder().decode(got.bytes);
+        const ok = txt === new TextDecoder().decode(bytes);
+        $('lbUsed').textContent = used + ' / ' + src.K;
+        $('lbOk').textContent = ok ? 'OK' : 'MISMATCH';
+        $('lbOk').className = ok ? 'ok' : '';
+        $('lbOut').textContent = txt;
+        return;
+      }
     }
+    $('lbUsed').textContent = used;
+    $('lbOk').textContent = 'FAIL';
+    showErr('lbErr', 'peel did not finish');
+  } catch (err) {
+    showErr('lbErr', String(err.message || err));
+    $('lbOk').textContent = 'FAIL';
+  } finally {
+    setOn($('runLoop'), false);
+    $('runLoop').textContent = 'Run loopback';
   }
-  $('lbUsed').textContent = used;
-  $('lbOk').textContent = 'FAIL';
 };
