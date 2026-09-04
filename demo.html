@@ -63,7 +63,6 @@
     .chip {
       flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line);
       border-radius: 8px; padding: 8px 10px; color: var(--dim); font-size: 13px;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .chip.on { border-color: var(--orange); color: var(--ink); }
     #qrWrap, #camWrap {
@@ -106,7 +105,7 @@
         <button class="btn ghost" type="button" id="clearFile">Clear</button>
       </div>
       <div class="chip" id="fileChip">No file — sending text</div>
-      <input id="fileIn" type="file" />
+      <input id="fileIn" type="file" accept="image/*,.txt,.json,.svg,.md,application/json" />
       <div class="grid">
         <div>
           <label class="field">FPS</label>
@@ -129,7 +128,7 @@
         <div class="stat"><label>Payload</label><b id="txBytes">—</b></div>
         <div class="stat"><label>Frame</label><b id="txFrame">—</b></div>
       </div>
-      <p class="hint">Toy OCC: keep files small (≤80 KB). A 2 MB clip at 48 B / 12 fps is ~1 hour of QR. Brightness max. Other phone → Receive.</p>
+      <p class="hint">OCC rate = fps × block. 12 × 48 B ≈ 0.6 KB/s. Photos shrink to ~64 KB JPEG (~2 min). Raw cap 256 KB. Video is the wrong medium for this pipe.</p>
     </section>
 
     <section id="recv" class="pane">

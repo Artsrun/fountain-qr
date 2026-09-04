@@ -1,5 +1,6 @@
 const MAGIC = 'DCI1';
-const MAX_BYTES = 80 * 1024;
+const TARGET_BYTES = 64 * 1024;
+const MAX_BYTES = 256 * 1024;
 const b64 = {
   enc: (u8) => {
     let s = '';
@@ -192,6 +193,67 @@ tabs.forEach((b) => {
 let txTimer = 0, txSeq = 0, txSrc = null, txSession = 0, txName = 'note.txt';
 let painting = false;
 let pickedFile = null;
+let prepared = null;
+
+const etaSec = (n, block, fps) => Math.max(1, Math.ceil((Math.ceil(n / block) * 1.2) / fps));
+const fmtEta = (s) => s < 90 ? s + 's' : (s / 60).toFixed(1) + ' min';
+const isImageFile = (f) => /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp|heic|heif)$/i.test(f.name);
+
+const decodeImage = async (file) => {
+  try {
+    return await createImageBitmap(file);
+  } catch {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((res, rej) => {
+        const el = new Image();
+        el.onload = () => res(el);
+        el.onerror = () => rej(new Error('cannot decode image'));
+        el.src = url;
+      });
+      return img;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+};
+
+const compressImage = async (file) => {
+  const img = await decodeImage(file);
+  const iw = img.width || img.naturalWidth;
+  const ih = img.height || img.naturalHeight;
+  let w = iw, h = ih;
+  const maxEdge = 960;
+  if (Math.max(w, h) > maxEdge) {
+    const s = maxEdge / Math.max(w, h);
+    w = Math.max(1, Math.round(w * s));
+    h = Math.max(1, Math.round(h * s));
+  }
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  let q = 0.7;
+  let blob = null;
+  for (let i = 0; i < 7; i++) {
+    c.width = w;
+    c.height = h;
+    ctx.drawImage(img, 0, 0, w, h);
+    blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', q));
+    if (blob && blob.size <= TARGET_BYTES) break;
+    if (!blob) break;
+    if (blob.size > TARGET_BYTES * 1.5) {
+      w = Math.max(160, Math.round(w * 0.75));
+      h = Math.max(160, Math.round(h * 0.75));
+    }
+    q = Math.max(0.32, q - 0.1);
+  }
+  if (img.close) img.close();
+  if (!blob) throw new Error('JPEG encode failed');
+  return {
+    bytes: new Uint8Array(await blob.arrayBuffer()),
+    name: file.name.replace(/\.[^.]+$/, '') + '.jpg',
+    from: file.size,
+  };
+};
 
 const paintQR = async (text) => {
   if (typeof QRCode === 'undefined') throw new Error('QRCode lib missing');
@@ -205,9 +267,18 @@ const paintQR = async (text) => {
 
 const syncFileChip = () => {
   const chip = $('fileChip');
-  if (!pickedFile) {
+  const block = Math.max(16, Math.min(200, +$('blockSize').value || 48));
+  const fps = Math.max(4, Math.min(30, +$('fps').value || 12));
+  if (!pickedFile && !prepared) {
     chip.textContent = 'No file — sending text';
     chip.classList.remove('on');
+    return;
+  }
+  if (prepared) {
+    const n = prepared.bytes.length;
+    const extra = prepared.from ? ` (from ${(prepared.from / 1024).toFixed(0)} KB)` : '';
+    chip.textContent = `${prepared.name} · ${(n / 1024).toFixed(1)} KB${extra} · ~${fmtEta(etaSec(n, block, fps))}`;
+    chip.classList.add('on');
     return;
   }
   chip.textContent = `${pickedFile.name} · ${(pickedFile.size / 1024).toFixed(1)} KB`;
@@ -215,23 +286,52 @@ const syncFileChip = () => {
 };
 
 $('pickFile').onclick = () => $('fileIn').click();
-$('fileIn').onchange = () => {
+$('fileIn').onchange = async () => {
   pickedFile = $('fileIn').files[0] || null;
-  syncFileChip();
+  prepared = null;
   showErr('txErr', '');
+  if (!pickedFile) { syncFileChip(); return; }
+  $('fileChip').textContent = 'Preparing…';
+  $('fileChip').classList.add('on');
+  try {
+    if (isImageFile(pickedFile) && pickedFile.size > TARGET_BYTES) {
+      prepared = await compressImage(pickedFile);
+      showErr('txErr', '');
+    } else if (pickedFile.size > MAX_BYTES) {
+      throw new Error(`raw file ${(pickedFile.size / 1024).toFixed(0)} KB — cap ${MAX_BYTES / 1024} KB. Photos auto-shrink; videos do not.`);
+    } else {
+      prepared = {
+        bytes: new Uint8Array(await pickedFile.arrayBuffer()),
+        name: pickedFile.name,
+        from: pickedFile.size,
+      };
+    }
+    if (prepared.bytes.length > MAX_BYTES) {
+      throw new Error(`still ${prepared.bytes.length} B after shrink — cap ${MAX_BYTES / 1024} KB`);
+    }
+    syncFileChip();
+  } catch (err) {
+    prepared = null;
+    pickedFile = null;
+    $('fileIn').value = '';
+    syncFileChip();
+    showErr('txErr', String(err.message || err));
+  }
 };
 $('clearFile').onclick = () => {
   pickedFile = null;
+  prepared = null;
   $('fileIn').value = '';
   syncFileChip();
   showErr('txErr', '');
 };
+$('fps').onchange = syncFileChip;
+$('blockSize').onchange = syncFileChip;
 
 const setStreaming = (on) => {
   setOn($('startSend'), on);
   $('startSend').textContent = on ? 'Streaming' : 'Start stream';
   $('startSend').disabled = on;
-  setOn($('stopSend'), !on && !!txTimer === false ? false : !on);
   setOn($('stopSend'), !on);
 };
 
@@ -239,22 +339,18 @@ $('startSend').onclick = async () => {
   showErr('txErr', '');
   clearInterval(txTimer);
   txTimer = 0;
-  const file = pickedFile;
-  let bytes, name;
   try {
-    if (file) {
-      if (file.size > MAX_BYTES) {
-        const mins = ((file.size / 48) / 12 / 60).toFixed(0);
-        throw new Error(`${(file.size / 1048576).toFixed(2)} MB is too big for this toy (≈${mins} min @ 48B/12fps). Clear file or pick ≤80 KB.`);
-      }
-      bytes = new Uint8Array(await file.arrayBuffer());
-      name = file.name;
+    let bytes, name;
+    if (prepared) {
+      bytes = prepared.bytes;
+      name = prepared.name;
     } else {
       bytes = new TextEncoder().encode($('textIn').value || 'hello');
       name = 'note.txt';
     }
     if (bytes.length > MAX_BYTES) throw new Error(`payload ${bytes.length} B > ${MAX_BYTES} B cap`);
     const blockSize = Math.max(16, Math.min(200, +$('blockSize').value || 48));
+    const fps = Math.max(4, Math.min(30, +$('fps').value || 12));
     txSrc = splitFile(bytes, blockSize);
     txSession = (Math.random() * 0xffffffff) >>> 0;
     txSeq = 0;
@@ -262,8 +358,7 @@ $('startSend').onclick = async () => {
     $('txSession').textContent = txSession.toString(16);
     $('txBytes').textContent = bytes.length + ' B';
     $('txSeq').textContent = '0 / ' + txSrc.K;
-    $('txFrame').textContent = 'painting…';
-    const fps = Math.max(4, Math.min(30, +$('fps').value || 12));
+    $('txFrame').textContent = '~' + fmtEta(etaSec(bytes.length, blockSize, fps));
     const tick = async () => {
       if (painting || !txSrc) return;
       painting = true;
@@ -273,7 +368,6 @@ $('startSend').onclick = async () => {
         $('txSeq').textContent = txSeq + ' / ' + txSrc.K;
         $('txFrame').textContent = droplet.length + ' ch';
         txSeq++;
-        showErr('txErr', '');
       } catch (err) {
         showErr('txErr', String(err.message || err));
         clearInterval(txTimer);
@@ -284,7 +378,6 @@ $('startSend').onclick = async () => {
       }
     };
     setStreaming(true);
-    setOn($('stopSend'), false);
     await tick();
     txTimer = setInterval(tick, 1000 / fps);
   } catch (err) {
