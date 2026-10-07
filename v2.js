@@ -1,9 +1,11 @@
 const MAGIC = 'DCI2';
+const MAGIC3 = 'DCI3';
 const SCAN = 360;
 const PRESETS = {
-  lock: { block: 32, fps: 8, target: 48 * 1024, cap: 96 * 1024 },
-  phone: { block: 80, fps: 12, target: 80 * 1024, cap: 160 * 1024 },
-  close: { block: 160, fps: 20, target: 140 * 1024, cap: 320 * 1024 },
+  lock: { block: 80, fps: 10, target: 64 * 1024, cap: 256 * 1024, ecc: 'M' },
+  phone: { block: 200, fps: 12, target: 200 * 1024, cap: 512 * 1024, ecc: 'M' },
+  close: { block: 340, fps: 12, target: 480 * 1024, cap: 1024 * 1024, ecc: 'M' },
+  power: { block: 560, fps: 10, target: 1024 * 1024, cap: 2 * 1024 * 1024, ecc: 'L' },
 };
 
 const b64 = {
@@ -19,6 +21,42 @@ const b64 = {
     const u8 = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
     return u8;
+  },
+};
+const B45 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
+const B45I = new Int16Array(128);
+B45I.fill(-1);
+for (let i = 0; i < B45.length; i++) B45I[B45.charCodeAt(i)] = i;
+const b45 = {
+  enc: (u8) => {
+    let s = '';
+    for (let i = 0; i < u8.length; i += 2) {
+      if (i + 1 === u8.length) {
+        const n = u8[i];
+        s += B45[(n / 45) | 0] + B45[n % 45];
+      } else {
+        const n = u8[i] * 256 + u8[i + 1];
+        s += B45[(n / 2025) | 0] + B45[((n / 45) | 0) % 45] + B45[n % 45];
+      }
+    }
+    return s;
+  },
+  dec: (s) => {
+    const out = [];
+    for (let i = 0; i < s.length; ) {
+      const a = B45I[s.charCodeAt(i)];
+      const b = B45I[s.charCodeAt(i + 1)];
+      if (a < 0 || b < 0) throw new Error('b45');
+      if (i + 2 >= s.length) { out.push(a * 45 + b); i += 2; }
+      else {
+        const c = B45I[s.charCodeAt(i + 2)];
+        if (c < 0) throw new Error('b45');
+        const n = a * 2025 + b * 45 + c;
+        out.push((n / 256) | 0, n % 256);
+        i += 3;
+      }
+    }
+    return new Uint8Array(out);
   },
 };
 
@@ -78,13 +116,13 @@ const packFrame = ({ flags, session, seq, K, blockSize, fileLen, name, idxs, pay
   buf[o++] = idxs.length;
   for (const i of idxs) { v.setUint16(o, i); o += 2; }
   buf.set(payload, o);
-  return MAGIC + b64.enc(buf);
+  return MAGIC3 + b45.enc(buf);
 };
 
 const unpackFrame = (text) => {
-  if (!text || !text.startsWith(MAGIC)) return null;
+  if (!text || (text.slice(0, 4) !== MAGIC3 && text.slice(0, 4) !== MAGIC)) return null;
   try {
-    const buf = b64.dec(text.slice(4));
+    const buf = text.startsWith(MAGIC3) ? b45.dec(text.slice(4)) : b64.dec(text.slice(4));
     const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     if (buf[0] !== 68 || buf[1] !== 67 || buf[2] !== 73 || buf[3] !== 50) return null;
     let o = 4;
@@ -193,9 +231,10 @@ const show = (id, msg, cls) => {
   el.className = 'banner on ' + (cls || '');
 };
 const hints = {
-  lock: 'Far or shaky. 32 B · 8 fps.',
-  phone: "Arm's length. 80 B · 12 fps.",
-  close: 'Bright and still. 160 B · 20 fps.',
+  lock: 'Far or shaky. 80 B · 10 fps.',
+  phone: "Arm's length. 200 B · 12 fps.",
+  close: 'Bright and still. 340 B · 12 fps.',
+  power: 'Propped, bright. 560 B · 10 fps. ECC L.',
 };
 const theme = document.querySelector('meta[name="theme-color"]');
 const setTheme = (c) => { if (theme) theme.content = c; };
@@ -207,7 +246,7 @@ const syncPresetUi = () => {
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
   const seg = document.querySelector('.seg');
-  if (seg) seg.dataset.i = String({ lock: 0, phone: 1, close: 2 }[v] ?? 1);
+  if (seg) seg.dataset.i = String({ lock: 0, phone: 1, close: 2, power: 3 }[v] ?? 1);
   const hint = $('presetHint');
   if (hint) hint.textContent = hints[v] || hints.phone;
 };
@@ -421,7 +460,7 @@ $('startSend').onclick = async () => {
       try {
         const droplet = makeDroplet(txSrc, txSession, txSeq, txName, flags);
         const px = $('qrWrap').classList.contains('fs') ? Math.min(900, Math.min(innerWidth, innerHeight) - 24) : 420;
-        await window.paintFountainQR($('qrCanvas'), droplet, px);
+        await window.paintFountainQR($('qrCanvas'), droplet, px, p.ecc || 'M');
         $('txSeq').textContent = txSeq + ' / ' + txSrc.K;
         txSeq++;
       } catch (e) {

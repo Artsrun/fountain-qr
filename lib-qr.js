@@ -70,19 +70,19 @@ const paintModules = (qr, canvas, sizePx) => {
   ctx.drawImage(off, margin * scale, margin * scale, n * scale, n * scale);
 };
 
-window.paintFountainQR = async (canvas, text, px = 420) => {
+window.paintFountainQR = async (canvas, text, px = 420, ecc = 'M') => {
   await window.ensureQR();
   const sizePx = Math.max(240, Math.min(900, px | 0));
   if (typeof qrcode !== 'function') {
     await QRCode.toCanvas(canvas, text, {
-      errorCorrectionLevel: 'M',
+      errorCorrectionLevel: ecc,
       margin: 2,
       width: sizePx,
       color: { dark: '#000000', light: '#ffffff' },
     });
     return;
   }
-  const qr = qrcode(0, 'M');
+  const qr = qrcode(0, ecc);
   qr.addData(text);
   qr.make();
   paintModules(qr, canvas, sizePx);

@@ -79,14 +79,15 @@
       background: #111; color: #fff; border: 0; border-radius: 999px; min-height: 44px; padding: 0 16px; font: inherit;
     }
     #qrWrap.fs .exit-light { display: inline-grid; place-items: center; }
-    .seg { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; padding: 4px; background: #0b1018; border: 1px solid var(--line); border-radius: 14px; margin: 12px 0 8px; }
+    .seg { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px; background: #0b1018; border: 1px solid var(--line); border-radius: 14px; margin: 12px 0 8px; }
     .seg::before {
-      content: ""; position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 16px) / 3);
+      content: ""; position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 20px) / 4);
       border-radius: 10px; background: var(--ink); z-index: 0;
       transition: translate 180ms cubic-bezier(.2,.8,.2,1);
     }
     .seg[data-i="1"]::before { translate: calc(100% + 4px) 0; }
     .seg[data-i="2"]::before { translate: calc(200% + 8px) 0; }
+    .seg[data-i="3"]::before { translate: calc(300% + 12px) 0; }
     .seg button { position: relative; z-index: 1; min-height: 44px; border: 0; background: transparent; color: var(--dim); border-radius: 10px; font: inherit; cursor: pointer; }
     .seg button.on { background: transparent; color: #12160e; font-weight: 650; }
     .hint { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
@@ -156,7 +157,7 @@
           <span>Point at the other phone. Download stays here.</span>
         </button>
       </div>
-      <p class="hint">Close, bright, still ≈ 3 KB/s. Far preset if the lock slips.</p>
+      <p class="hint">Power, propped and still ≈ 5 KB/s. Far if the lock slips.</p>
     </section>
 
     <section id="send" class="pane">
@@ -173,12 +174,14 @@
         <button type="button" data-preset="lock">Far</button>
         <button type="button" data-preset="phone" class="on" aria-pressed="true">Phone</button>
         <button type="button" data-preset="close">Close</button>
+        <button type="button" data-preset="power">Power</button>
       </div>
-      <p class="hint" id="presetHint">Arm’s length. 80 B · 12 fps.</p>
+      <p class="hint" id="presetHint">Arm’s length. 200 B · 12 fps.</p>
       <select id="preset" aria-hidden="true" tabindex="-1">
         <option value="lock">Far</option>
         <option value="phone" selected>Phone</option>
         <option value="close">Close</option>
+        <option value="power">Power</option>
       </select>
       <div class="row">
         <button class="btn gold grow" type="button" id="startSend">Start stream</button>
@@ -229,7 +232,7 @@
       <pre id="textOut"></pre>
       <img id="preview" alt="" />
     </section>
-    <footer>Fountain QR · DCI2 · not a Decimen port.</footer>
+    <footer>Fountain QR · DCI3 base45 · DCI2 still reads. Not a Decimen port.</footer>
   </main>
   <script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"></script>
   <script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"></script>
