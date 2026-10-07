@@ -3,9 +3,9 @@ const MAGIC3 = 'DCI3';
 const SCAN = 360;
 const PRESETS = {
   lock: { block: 80, fps: 10, target: 64 * 1024, cap: 256 * 1024, ecc: 'M' },
-  phone: { block: 200, fps: 12, target: 200 * 1024, cap: 512 * 1024, ecc: 'M' },
-  close: { block: 340, fps: 12, target: 480 * 1024, cap: 1024 * 1024, ecc: 'M' },
-  power: { block: 560, fps: 10, target: 1024 * 1024, cap: 2 * 1024 * 1024, ecc: 'L' },
+  phone: { block: 240, fps: 12, target: 256 * 1024, cap: 768 * 1024, ecc: 'M' },
+  close: { block: 400, fps: 12, target: 640 * 1024, cap: 1536 * 1024, ecc: 'M' },
+  power: { block: 960, fps: 8, target: 1024 * 1024, cap: 4 * 1024 * 1024, ecc: 'L' },
 };
 
 const b64 = {
@@ -232,9 +232,9 @@ const show = (id, msg, cls) => {
 };
 const hints = {
   lock: 'Far or shaky. 80 B · 10 fps.',
-  phone: "Arm's length. 200 B · 12 fps.",
-  close: 'Bright and still. 340 B · 12 fps.',
-  power: 'Propped, bright. 560 B · 10 fps. ECC L.',
+  phone: "Arm's length. 240 B · 12 fps.",
+  close: 'Bright and still. 400 B · 12 fps.',
+  power: 'Propped, bright. 960 B · 8 fps. ECC L. v28.',
 };
 const theme = document.querySelector('meta[name="theme-color"]');
 const setTheme = (c) => { if (theme) theme.content = c; };

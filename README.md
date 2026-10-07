@@ -6,17 +6,15 @@ Screen → camera file transfer. Luby peel. No file-path network.
 - v1 lab: https://artsrun.github.io/fountain-qr/demo.html
 - Notes: https://artsrun.github.io/fountain-qr/notes.html
 
-Not a port of [Decimen](https://decimen.app/). Phone-lock first, density as a preset.
+Not a port of [Decimen](https://decimen.app/). Send wire is `DCI3` (base45). Receivers still peel `DCI2`.
 
-Send wire is `DCI3` (base45, QR alphanumeric). Receivers still peel `DCI2`. jsQR drops raw bytes above 127, so the frame is not raw binary.
+jsQR drops raw bytes above 127. v23 (about 640 B at ECC L) failed jsQR on three seeds. Ceiling that still locked after a 360² downscale:
 
-Clean-render lab, jsQR, 4 px/module, not a phone camera:
+| Preset | Block | fps | ECC | QR | Lab payload rate | Cap |
+| --- | --- | --- | --- | --- | --- | --- |
+| Far | 80 B | 10 | M | v10 | 0.8 KB/s | 256 KB |
+| Phone | 240 B | 12 | M | v16 | 2.9 KB/s | 768 KB |
+| Close | 400 B | 12 | M | v20 | 4.8 KB/s | 1.5 MB |
+| Power | 960 B | 8 | L | v28 | 7.7 KB/s | 4 MB |
 
-| Preset | Block | fps | ECC | QR | Payload rate |
-| --- | --- | --- | --- | --- | --- |
-| Far | 80 B | 10 | M | v10 | 0.8 KB/s |
-| Phone | 200 B | 12 | M | v15 | 2.4 KB/s |
-| Close | 340 B | 12 | M | v19 | 4.1 KB/s |
-| Power | 560 B | 10 | L | v21 | 5.6 KB/s |
-
-Caps: 256 KB / 512 KB / 1 MB / 2 MB. A 560 B block at ECC L failed jsQR in this lab; 560 B passed.
+960 B passed 3 seeds at 4 px/module and again after draw into 360². 1040 B failed that downscale. Clean render, not a phone camera.
