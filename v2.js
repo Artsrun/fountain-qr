@@ -192,13 +192,52 @@ const show = (id, msg, cls) => {
   el.textContent = msg;
   el.className = 'banner on ' + (cls || '');
 };
+const hints = {
+  lock: 'Far or shaky. 32 B · 8 fps.',
+  phone: "Arm's length. 80 B · 12 fps.",
+  close: 'Bright and still. 160 B · 20 fps.',
+};
+const theme = document.querySelector('meta[name="theme-color"]');
+const setTheme = (c) => { if (theme) theme.content = c; };
+const syncPresetUi = () => {
+  const v = $('preset').value;
+  document.querySelectorAll('[data-preset]').forEach((b) => {
+    const on = b.dataset.preset === v;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  const hint = $('presetHint');
+  if (hint) hint.textContent = hints[v] || hints.phone;
+};
+const setLight = (on) => {
+  $('qrWrap').classList.toggle('fs', on);
+  setTheme(on ? '#ffffff' : '#070a11');
+  const light = $('lightBtn');
+  if (light) light.textContent = on ? 'Exit' : 'Light';
+};
 const setTab = (id) => {
-  document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === id));
-  if (id !== 'send') $('qrWrap').classList.remove('fs');
+  const go = () => {
+    document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === id));
+    if (id !== 'send') setLight(false);
+    document.body.dataset.pane = id;
+  };
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (document.startViewTransition && !reduce) document.startViewTransition(go);
+  else go();
 };
 document.querySelectorAll('[data-go]').forEach((b) => {
   b.onclick = () => setTab(b.dataset.go);
 });
+document.querySelectorAll('[data-preset]').forEach((b) => {
+  b.onclick = () => {
+    $('preset').value = b.dataset.preset;
+    $('preset').dispatchEvent(new Event('change'));
+  };
+});
+const lightBtn = $('lightBtn');
+if (lightBtn) lightBtn.onclick = () => setLight(!$('qrWrap').classList.contains('fs'));
+const exitLight = $('exitLight');
+if (exitLight) exitLight.onclick = (e) => { e.stopPropagation(); setLight(false); };
 
 const etaSec = (n, block, fps) => Math.max(1, Math.ceil((Math.ceil(n / block) * 1.2) / fps));
 const fmtEta = (s) => (s < 90 ? s + 's' : (s / 60).toFixed(1) + ' min');
@@ -334,14 +373,17 @@ $('clearFile').onclick = () => {
   picked = prepared = null; flags = 0; $('fileIn').value = '';
   syncChip(); show('txErr', '');
 };
-$('preset').onchange = syncChip;
+$('preset').onchange = () => { syncChip(); syncPresetUi(); };
+syncPresetUi();
 
-$('qrWrap').onclick = () => $('qrWrap').classList.toggle('fs');
+$('qrWrap').onclick = (e) => { if (e.target.closest('.exit-light')) return; setLight(!$('qrWrap').classList.contains('fs')); };
 
 const setStreaming = (on) => {
   $('startSend').classList.toggle('on', on);
   $('startSend').textContent = on ? 'Streaming' : 'Start stream';
   $('startSend').disabled = on;
+  $('send').classList.toggle('live', on);
+  setLight(on);
 };
 
 const haltTx = () => {
@@ -409,6 +451,7 @@ const setCam = (on) => {
   $('startCam').classList.toggle('on', on);
   $('startCam').textContent = on ? 'Camera on' : 'Start camera';
   $('startCam').disabled = on;
+  $('recv').classList.toggle('live', on);
 };
 
 const resetRx = () => {
