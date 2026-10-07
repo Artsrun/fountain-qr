@@ -57,6 +57,13 @@
     .btn.on { background: var(--green); border-color: var(--green); color: #04140c; }
     .btn:disabled { opacity: .45; }
     .btn.grow { flex: 1; }
+    .btn, .action, .seg button, .exit-light, a.dl {
+      transition: transform 140ms cubic-bezier(.2,.7,.2,1), background-color 160ms, color 160ms, border-color 160ms;
+    }
+    .btn:active, .action:active, .seg button:active, .exit-light:active, a.dl:active { transform: scale(.98); }
+    @media (hover: hover) {
+      .action:hover { border-color: #3a4a63; }
+    }
     .stage {
       background: #fff; color: #111; border-radius: 20px; min-height: 280px;
       display: grid; place-items: center; overflow: hidden; position: relative;
@@ -72,9 +79,16 @@
       background: #111; color: #fff; border: 0; border-radius: 999px; min-height: 44px; padding: 0 16px; font: inherit;
     }
     #qrWrap.fs .exit-light { display: inline-grid; place-items: center; }
-    .seg { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; padding: 4px; background: #0b1018; border: 1px solid var(--line); border-radius: 14px; margin: 12px 0 8px; }
-    .seg button { min-height: 44px; border: 0; background: transparent; color: var(--dim); border-radius: 10px; font: inherit; cursor: pointer; }
-    .seg button.on { background: var(--ink); color: #12160e; font-weight: 650; }
+    .seg { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; padding: 4px; background: #0b1018; border: 1px solid var(--line); border-radius: 14px; margin: 12px 0 8px; }
+    .seg::before {
+      content: ""; position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 16px) / 3);
+      border-radius: 10px; background: var(--ink); z-index: 0;
+      transition: translate 180ms cubic-bezier(.2,.8,.2,1);
+    }
+    .seg[data-i="1"]::before { translate: calc(100% + 4px) 0; }
+    .seg[data-i="2"]::before { translate: calc(200% + 8px) 0; }
+    .seg button { position: relative; z-index: 1; min-height: 44px; border: 0; background: transparent; color: var(--dim); border-radius: 10px; font: inherit; cursor: pointer; }
+    .seg button.on { background: transparent; color: #12160e; font-weight: 650; }
     .hint { color: var(--dim); font-size: 13px; margin: 0 0 12px; }
     .row { display: flex; gap: 8px; margin: 10px 0; }
     textarea {
@@ -83,10 +97,11 @@
     }
     details { border: 1px solid var(--line); border-radius: 14px; padding: 4px 12px 12px; margin-top: 8px; background: var(--panel); }
     summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; }
-    .chip { color: var(--dim); font-size: 14px; padding: 8px 0; }
+    .chip { color: var(--dim); font-size: 14px; padding: 8px 0; transition: color 160ms; }
     .chip.on { color: var(--ink); }
     .banner { display: none; margin: 10px 0; padding: 12px; border-radius: 12px; font-size: 14px; }
-    .banner.on { display: block; }
+    .banner.on { display: block; animation: rise 220ms cubic-bezier(.2,.7,.2,1); }
+    @keyframes rise { from { opacity: 0; translate: 0 6px; } }
     .banner.err { background: #1a0c10; color: var(--red); }
     .banner.ok { background: #0c1a14; color: var(--green); }
     .meter { display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--dim); margin-top: 12px; }
@@ -95,14 +110,16 @@
     .finder { position: relative; background: #05070c; border-radius: 20px; overflow: hidden; min-height: 280px; display: grid; place-items: center; }
     .finder::before, .finder::after {
       content: ""; position: absolute; width: 28px; height: 28px; border: 2px solid var(--gold); pointer-events: none; z-index: 2;
+      transition: border-color 220ms;
     }
+    .finder.locked::before, .finder.locked::after { border-color: var(--green); }
     .finder::before { top: 14px; left: 14px; border-right: 0; border-bottom: 0; }
     .finder::after { right: 14px; bottom: 14px; border-left: 0; border-top: 0; }
     #camVideo { display: none; }
     .track { height: 8px; background: #0b1018; border-radius: 99px; overflow: hidden; margin: 12px 0; }
-    .track > i { display: block; height: 100%; width: 0; background: var(--gold); }
+    .track > i { display: block; height: 100%; width: 0; background: var(--gold); transition: width 180ms linear; }
     #preview { width: 100%; border-radius: 14px; margin-top: 10px; display: none; }
-    #preview[src] { display: block; }
+    #preview[src] { display: block; animation: rise 220ms cubic-bezier(.2,.7,.2,1); }
     #textOut { white-space: pre-wrap; color: var(--dim); font-size: 13px; }
     #fileIn, #preset { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
     footer { color: var(--dim); font-size: 12px; margin-top: 8px; }
@@ -152,7 +169,7 @@
         <canvas id="qrCanvas"></canvas>
         <button class="exit-light" type="button" id="exitLight">Exit</button>
       </div>
-      <div class="seg" role="radiogroup" aria-label="Distance">
+      <div class="seg" data-i="1" role="radiogroup" aria-label="Distance">
         <button type="button" data-preset="lock">Far</button>
         <button type="button" data-preset="phone" class="on" aria-pressed="true">Phone</button>
         <button type="button" data-preset="close">Close</button>

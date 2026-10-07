@@ -206,6 +206,8 @@ const syncPresetUi = () => {
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
+  const seg = document.querySelector('.seg');
+  if (seg) seg.dataset.i = String({ lock: 0, phone: 1, close: 2 }[v] ?? 1);
   const hint = $('presetHint');
   if (hint) hint.textContent = hints[v] || hints.phone;
 };
@@ -462,6 +464,7 @@ const resetRx = () => {
   $('textOut').textContent = '';
   $('preview').removeAttribute('src');
   $('rxBar').style.width = '0';
+  $('camWrap')?.classList.remove('locked');
   $('rxLock').textContent = '—';
   $('rxLock').className = '';
   $('rxSolved').textContent = '0/0';
@@ -475,6 +478,7 @@ const paintRx = (r, force) => {
   rxUiAt = now;
   $('rxLock').textContent = r.meta ? 'LOCK' : '—';
   $('rxLock').className = r.meta ? 'ok' : '';
+  $('camWrap')?.classList.toggle('locked', !!r.meta);
   $('rxSolved').textContent = (decoder.recovered || 0) + '/' + (r.K || 0);
   $('rxFrames').textContent = newN + '/' + dupN;
   $('rxDrop').textContent = dropN;
