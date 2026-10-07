@@ -1,4 +1,5 @@
 const MAGIC = 'DCI2';
+const SCAN = 360;
 const PRESETS = {
   lock: { block: 32, fps: 8, target: 48 * 1024, cap: 96 * 1024 },
   phone: { block: 80, fps: 12, target: 80 * 1024, cap: 160 * 1024 },
@@ -7,9 +8,11 @@ const PRESETS = {
 
 const b64 = {
   enc: (u8) => {
-    let s = '';
-    for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
-    return btoa(s);
+    const parts = [];
+    for (let i = 0; i < u8.length; i += 0x8000) {
+      parts.push(String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)));
+    }
+    return btoa(parts.join(''));
   },
   dec: (s) => {
     const bin = atob(s);
@@ -29,13 +32,19 @@ const mulberry = (seed) => {
   };
 };
 
+let xorBuf = new Uint8Array(0);
+let xorSize = 0;
 const xorBlocks = (blocks, idxs, size) => {
-  const out = new Uint8Array(size);
-  for (const i of idxs) {
-    const b = blocks[i];
-    for (let j = 0; j < size; j++) out[j] ^= b[j];
+  if (xorSize !== size) {
+    xorBuf = new Uint8Array(size);
+    xorSize = size;
   }
-  return out;
+  xorBuf.fill(0);
+  for (let k = 0; k < idxs.length; k++) {
+    const b = blocks[idxs[k]];
+    for (let j = 0; j < size; j++) xorBuf[j] ^= b[j];
+  }
+  return xorBuf;
 };
 
 const pickIdx = (rng, deg, K) => {
@@ -125,21 +134,26 @@ const createDecoder = () => {
     let progressed = true;
     while (progressed) {
       progressed = false;
-      for (const d of droplets) {
+      for (let d = droplets.length - 1; d >= 0; d--) {
+        const drop = droplets[d];
         const next = [];
-        for (const i of d.idxs) {
-          if (solved[i]) {
-            for (let j = 0; j < d.payload.length; j++) d.payload[j] ^= solved[i][j];
+        for (let k = 0; k < drop.idxs.length; k++) {
+          const i = drop.idxs[k];
+          const s = solved[i];
+          if (s) {
+            const p = drop.payload;
+            for (let j = 0; j < p.length; j++) p[j] ^= s[j];
           } else next.push(i);
         }
-        d.idxs = next;
-        if (d.idxs.length !== 1) continue;
-        const i = d.idxs[0];
-        if (solved[i]) continue;
-        solved[i] = d.payload.slice();
+        drop.idxs = next;
+        if (next.length !== 1 || solved[next[0]]) {
+          if (!next.length) droplets.splice(d, 1);
+          continue;
+        }
+        solved[next[0]] = drop.payload;
         recovered++;
         progressed = true;
-        d.idxs = [];
+        droplets.splice(d, 1);
       }
     }
   };
@@ -254,8 +268,28 @@ const sha8 = async (u8) => {
   return [...new Uint8Array(buf).slice(0, 4)].map((b) => b.toString(16).padStart(2, '0')).join('');
 };
 
+const startClock = (fps, tick) => {
+  const step = 1000 / fps;
+  let acc = 0;
+  let last = performance.now();
+  let raf = 0;
+  let dead = false;
+  const loop = (now) => {
+    if (dead) return;
+    acc += now - last;
+    last = now;
+    if (acc >= step) {
+      acc = Math.min(acc - step, step);
+      tick();
+    }
+    raf = requestAnimationFrame(loop);
+  };
+  raf = requestAnimationFrame(loop);
+  return () => { dead = true; cancelAnimationFrame(raf); };
+};
+
 let picked = null, prepared = null, flags = 0;
-let txTimer = 0, txSeq = 0, txSrc = null, txSession = 0, txName = 'note.txt', painting = false;
+let stopTx = () => {}, txSeq = 0, txSrc = null, txSession = 0, txName = 'note.txt', painting = false;
 
 const syncChip = () => {
   const p = preset();
@@ -310,9 +344,15 @@ const setStreaming = (on) => {
   $('startSend').disabled = on;
 };
 
+const haltTx = () => {
+  stopTx();
+  stopTx = () => {};
+  painting = false;
+};
+
 $('startSend').onclick = async () => {
   show('txErr', '');
-  clearInterval(txTimer); txTimer = 0;
+  haltTx();
   try {
     await window.ensureQR();
     const p = preset();
@@ -342,12 +382,13 @@ $('startSend').onclick = async () => {
         txSeq++;
       } catch (e) {
         show('txErr', String(e.message || e), 'err');
-        clearInterval(txTimer); txTimer = 0; setStreaming(false);
+        haltTx();
+        setStreaming(false);
       } finally { painting = false; }
     };
     setStreaming(true);
     await tick();
-    txTimer = setInterval(tick, 1000 / p.fps);
+    stopTx = startClock(p.fps, tick);
   } catch (e) {
     show('txErr', String(e.message || e), 'err');
     setStreaming(false);
@@ -355,11 +396,14 @@ $('startSend').onclick = async () => {
 };
 
 $('stopSend').onclick = () => {
-  clearInterval(txTimer); txTimer = 0; painting = false; setStreaming(false);
+  haltTx();
+  setStreaming(false);
 };
 
 let camStream = null, camLoop = 0, decoder = createDecoder();
 let dropN = 0, newN = 0, dupN = 0, finished = false;
+let scanCtx = null;
+let rxUiAt = 0;
 
 const setCam = (on) => {
   $('startCam').classList.toggle('on', on);
@@ -375,20 +419,33 @@ const resetRx = () => {
   $('textOut').textContent = '';
   $('preview').removeAttribute('src');
   $('rxBar').style.width = '0';
+  $('rxLock').textContent = '—';
+  $('rxLock').className = '';
+  $('rxSolved').textContent = '0/0';
+  $('rxFrames').textContent = '0/0';
+  $('rxDrop').textContent = '0';
 };
 
-const onText = async (text) => {
-  const frame = unpackFrame(text);
-  if (!frame) { dropN++; $('rxDrop').textContent = dropN; return; }
-  let r = decoder.add(frame);
-  if (r.reset) { resetRx(); r = decoder.add(frame); }
-  if (r.dup) dupN++;
-  else if (r.ok) newN++;
+const paintRx = (r, force) => {
+  const now = performance.now();
+  if (!force && now - rxUiAt < 125) return;
+  rxUiAt = now;
   $('rxLock').textContent = r.meta ? 'LOCK' : '—';
   $('rxLock').className = r.meta ? 'ok' : '';
   $('rxSolved').textContent = (decoder.recovered || 0) + '/' + (r.K || 0);
   $('rxFrames').textContent = newN + '/' + dupN;
+  $('rxDrop').textContent = dropN;
   if (r.K) $('rxBar').style.width = Math.min(100, (100 * decoder.recovered) / r.K) + '%';
+};
+
+const onText = async (text) => {
+  const frame = unpackFrame(text);
+  if (!frame) { dropN++; return; }
+  let r = decoder.add(frame);
+  if (r.reset) { resetRx(); r = decoder.add(frame); }
+  if (r.dup) dupN++;
+  else if (r.ok) newN++;
+  paintRx(r, r.done);
   if (r.done && !finished) {
     finished = true;
     const got = decoder.assemble();
@@ -407,13 +464,20 @@ const onText = async (text) => {
   }
 };
 
-const scan = (canvas) => {
-  if (typeof jsQR !== 'function') return;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const { width, height } = canvas;
-  if (!width || !height) return;
-  const img = ctx.getImageData(0, 0, width, height);
-  const code = jsQR(img.data, width, height, { inversionAttempts: 'dontInvert' });
+const bindScan = () => {
+  const canvas = $('camCanvas');
+  if (canvas.width !== SCAN || !scanCtx) {
+    canvas.width = SCAN;
+    canvas.height = SCAN;
+    scanCtx = canvas.getContext('2d', { willReadFrequently: true, alpha: false });
+  }
+  return canvas;
+};
+
+const scan = () => {
+  if (typeof jsQR !== 'function' || !scanCtx) return;
+  const img = scanCtx.getImageData(0, 0, SCAN, SCAN);
+  const code = jsQR(img.data, SCAN, SCAN, { inversionAttempts: 'dontInvert' });
   if (code && code.data) onText(code.data);
 };
 
@@ -434,17 +498,15 @@ $('startCam').onclick = async () => {
   video.srcObject = camStream;
   await video.play();
   setCam(true);
-  const canvas = $('camCanvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  bindScan();
   const loop = () => {
     camLoop = requestAnimationFrame(loop);
     if (video.readyState < 2) return;
     const w = video.videoWidth, h = video.videoHeight;
-    if (!w) return;
+    if (!w || !scanCtx) return;
     const side = Math.min(w, h);
-    canvas.width = 480; canvas.height = 480;
-    ctx.drawImage(video, (w - side) / 2, (h - side) / 2, side, side, 0, 0, 480, 480);
-    scan(canvas);
+    scanCtx.drawImage(video, (w - side) / 2, (h - side) / 2, side, side, 0, 0, SCAN, SCAN);
+    scan();
   };
   loop();
 };
